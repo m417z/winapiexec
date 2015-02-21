@@ -1,5 +1,4 @@
 #include <windows.h>
-#include "args.h"
 #include "buffer.h"
 
 #define DEF_VERSION L"1.0"
@@ -19,7 +18,11 @@ void main()
 {
 	WCHAR **p_argv;
 
-	setargv(&argc, &argv);
+	argv = CommandLineToArgvW(GetCommandLine(), &argc);
+	if(!argv)
+	{
+		ExitProcess(1);
+	}
 
 	if(argc < 2)
 	{
@@ -136,7 +139,7 @@ arguments_reverse_end:
 		push ebx
 		mov ebp, esp // These three lines are knida hack of
 		push eax     // pushing a string in inline asm
-		} stack_error_msg = L"Stack error on argument number %d"; __asm{
+		} stack_error_msg = L"Stack error on argument number %d"; __asm {
 		call FatalExitMsgBox
 
 stack_is_ok:

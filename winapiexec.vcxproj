@@ -171,11 +171,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="args.c" />
     <ClCompile Include="winapiexec.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="args.h" />
     <ClInclude Include="buffer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
