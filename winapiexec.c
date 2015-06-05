@@ -237,10 +237,16 @@ DWORD_PTR ParseArg(WCHAR *pszArg)
 			break;
 
 		case L'a': // array
-			dw = ParseArrayArg(pszArg + 3);
+			dw = ParseArrayArg(pszArg);
 			bParsed = TRUE;
 			break;
 		}
+	}
+	else if(pszArg[0] == L'$' && pszArg[1] == L'a' && pszArg[2] == L'[')
+	{
+		// array brackets syntax, e.g. "$a[1,2,3]"
+		dw = ParseArrayArg(pszArg);
+		bParsed = TRUE;
 	}
 
 	if(!bParsed)
@@ -258,30 +264,56 @@ DWORD_PTR ParseArg(WCHAR *pszArg)
 
 DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg)
 {
-	int array_count;
+	BOOL bBracketsSyntax;
+	int nBracketsCount;
+	int nArrayCount;
 	int i;
 	DWORD_PTR *pdw;
-	WCHAR *pszNext;
+	WCHAR *pszArrayItem, *pszNextItem;
 
-	array_count = 1;
+	// bBracketsSyntax is TRUE for "$a[1,2,3]", FALSE for "$a:1,2,3"
+	bBracketsSyntax = (pszArrayArg[2] == L'[');
+	nBracketsCount = 0;
 
-	for(i = 0; pszArrayArg[i] != L'\0'; i++)
+	nArrayCount = 1;
+
+	for(i = 3; pszArrayArg[i] != L'\0'; i++)
 	{
-		if(pszArrayArg[i] == L',')
+		if(bBracketsSyntax)
+		{
+			if(pszArrayArg[i] == L'[')
+			{
+				nBracketsCount++;
+			}
+			else if(pszArrayArg[i] == L']')
+			{
+				if(nBracketsCount == 0)
+				{
+					pszArrayArg[i] = L'\0';
+					break;
+				}
+
+				nBracketsCount--;
+			}
+		}
+
+		if(nBracketsCount == 0 && pszArrayArg[i] == L',')
 		{
 			pszArrayArg[i] = L'\0';
-			array_count++;
+			nArrayCount++;
 		}
 	}
 
-	pdw = (DWORD_PTR *)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, array_count * sizeof(DWORD_PTR));
+	pdw = (DWORD_PTR *)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, nArrayCount * sizeof(DWORD_PTR));
 
-	for(i = 0; i < array_count; i++)
+	pszArrayItem = pszArrayArg + 3;
+	for(i = 0; i < nArrayCount - 1; i++)
 	{
-		pszNext = pszArrayArg + lstrlen(pszArrayArg) + 1;
-		pdw[i] = ParseArg(pszArrayArg);
-		pszArrayArg = pszNext;
+		pszNextItem = pszArrayItem + lstrlen(pszArrayItem) + 1;
+		pdw[i] = ParseArg(pszArrayItem);
+		pszArrayItem = pszNextItem;
 	}
+	pdw[i] = ParseArg(pszArrayItem);
 
 	return (DWORD_PTR)pdw;
 }
