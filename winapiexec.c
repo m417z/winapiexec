@@ -3,16 +3,20 @@
 
 #define DEF_VERSION L"1.0"
 
-DWORD __stdcall ParseExecArgs(WCHAR ***p_argv);
-FARPROC __stdcall MyGetProcAddress(WCHAR *pszModuleProcStr);
-DWORD __stdcall ParseArg(WCHAR *pszArg);
-DWORD ParseArrayArg(WCHAR *pszArrayArg);
-WCHAR *StrToDword(WCHAR *pszStr, DWORD *pdw);
+DWORD_PTR ParseExecArgs(WCHAR ***pp_argv);
+DWORD_PTR __stdcall ParseExecFunction(WCHAR ***pp_argv);
+DWORD_PTR __stdcall GetFunctionPtr(WCHAR ***pp_argv);
+DWORD_PTR __stdcall GetNextArg(WCHAR ***pp_argv, BOOL *pbNoMoreArgs);
+__declspec(noreturn) void __stdcall FatalStackError(WCHAR **p_argv);
+FARPROC MyGetProcAddress(WCHAR *pszModuleProcStr);
+DWORD_PTR ParseArg(WCHAR *pszArg);
+DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg);
+WCHAR *StrToDwordPtr(WCHAR *pszStr, DWORD_PTR *pdw);
 char *UnicodeToAscii(WCHAR *pszUnicode);
-__declspec(noreturn) void __stdcall FatalExitMsgBox(WCHAR *format, ...);
+__declspec(noreturn) void FatalExitMsgBox(WCHAR *format, ...);
 
 int argc;
-TCHAR **argv;
+WCHAR **argv;
 
 void main()
 {
@@ -34,132 +38,100 @@ void main()
 	ExitProcess(ParseExecArgs(&p_argv));
 }
 
-__declspec(naked) DWORD __stdcall ParseExecArgs(WCHAR ***p_argv)
+DWORD_PTR ParseExecArgs(WCHAR ***pp_argv)
 {
-	WCHAR *stack_error_msg;
+	DWORD_PTR dwRet;
+	WCHAR *argv;
 
+	dwRet = ParseExecFunction(pp_argv);
+	argv = **pp_argv;
+
+	// After calling ParseExecFunction, argv is supposed
+	// to point at a NULL pointer, or ",", or ")"
+
+	while(argv && argv[0] == L',' && argv[1] == L'\0')
+	{
+		(*pp_argv)++;
+		argv = **pp_argv;
+		if(!argv)
+			break;
+
+		dwRet = ParseExecFunction(pp_argv);
+		argv = **pp_argv;
+	}
+
+	return dwRet;
+}
+
+__declspec(naked) DWORD_PTR __stdcall ParseExecFunction(WCHAR ***pp_argv)
+{
 	__asm
 	{
 
-	push ebp // stack
+	push ebp // Stack
 	mov ebp, esp
-	push ebx // pointer to the module/proc arg
-	push esi // pointer to arg
-	push edi // loop again or not (a boolean)
+	push ebx // Pointer to the function name argument
+	push ecx // Stack variable, used as bNoMoreArgs
 
-	mov eax, p_argv
-	mov esi, dword ptr [eax]
+	// Save pointer to the function name argument
+	mov ecx, pp_argv
+	mov ebx, dword ptr [ecx]
 
-main_loop:
-		mov ebx, esi
+	// Push 16 zeros on the stack, for better safety
+	mov ecx, 0x10
+push_zeroes_loop:
+	push 0x00
+	loop push_zeroes_loop
 
-		// get proc address
-		push dword ptr [esi]
-		call MyGetProcAddress
-		push eax
-		add esi, 0x04
-
-		// arguments parse
-		xor edi, edi
+	// Push function pointer and arguments
+	push pp_argv
+	call GetFunctionPtr
 
 arguments_parse_loop:
-			mov eax, dword ptr [esi]
-			test eax, eax
-			je arguments_parse_end // no more arguments
+	push eax
 
-			cmp dword ptr [eax], L','
-			je arguments_parse_end_comma
+	lea ecx, dword ptr [ebp-0x08]
+	push ecx
+	push pp_argv
+	call GetNextArg
 
-			cmp dword ptr [eax], L')'
-			je arguments_parse_end_closing_bracket
+	cmp dword ptr [ebp-0x08], 0
+	je arguments_parse_loop // jmp if !bNoMoreArgs
 
-			cmp dword ptr [eax], L'('
-			jnz not_a_nested_call
-
-			add esi, 0x04
-			mov eax, dword ptr [esi]
-			test eax, eax
-			je arguments_parse_end // no more arguments
-
-			mov ecx, p_argv // save to p_argv
-			mov dword ptr [ecx], esi
-			push ecx
-			call ParseExecArgs
-			mov ecx, p_argv // load from p_argv
-			mov esi, dword ptr [ecx]
-			jmp arguments_parse_bottom
-
-not_a_nested_call:
-			push eax
-			call ParseArg
-			mov dword ptr [esi], eax
-			add esi, 0x04
-
-arguments_parse_bottom:
-			push eax
-			jmp arguments_parse_loop
-
-arguments_parse_end_comma:
-		inc edi
-arguments_parse_end_closing_bracket:
-		add esi, 0x04
-arguments_parse_end:
-
-		// arguments reverse in stack
-		mov eax, esp
-		lea ecx, dword ptr [ebp-0x10]
+	// Reverse arguments in stack
+	mov eax, esp
+	lea ecx, dword ptr [ebp-0x4C]
 
 arguments_reverse_loop:
-			cmp eax, ecx
-			jge arguments_reverse_end
+	mov edx, dword ptr [eax]
+	xchg dword ptr [ecx], edx
+	mov dword ptr [eax], edx
 	
-			mov edx, dword ptr [eax]
-			xchg dword ptr [ecx], edx
-			mov dword ptr [eax], edx
+	add eax, 0x04
+	sub ecx, 0x04
+
+	cmp eax, ecx
+	jb arguments_reverse_loop
 	
-			add eax, 0x04
-			sub ecx, 0x04
-			jmp arguments_reverse_loop
+	// Call!
+	pop eax
+	call eax
 
-arguments_reverse_end:
+	mov dword ptr [ebx], eax
 
-		// call!
-		pop eax
-		call eax
+	// Check and restore stack
+	lea ecx, dword ptr [ebp-0x48]
+	cmp esp, ecx
+	jbe stack_is_ok
 
-		mov dword ptr [ebx], eax
-
-		// check and restore stack
-		lea ecx, dword ptr [ebp-0x0C]
-		cmp esp, ecx
-		jbe stack_is_ok
-
-		sub ebx, argv
-		shr ebx, 0x02
-		push ebx
-		mov ebp, esp // These three lines are knida hack of
-		push eax     // pushing a string in inline asm
-		} stack_error_msg = L"Stack error on argument number %d"; __asm {
-		call FatalExitMsgBox
+	push ebx
+	call FatalStackError
 
 stack_is_ok:
-		mov esp, ecx
+	mov esp, ecx
+	add esp, 0x44
 
-		// go again?
-		test edi, edi
-		je main_end
-
-		cmp dword ptr [esi], 0
-		jnz main_loop // stop if no more arguments
-
-main_end:
-
-	// save to p_argv
-	mov ecx, p_argv
-	mov dword ptr [ecx], esi
-
-	pop edi
-	pop esi
+	// Done
 	pop ebx
 	pop ebp
 	ret 0x04
@@ -167,7 +139,74 @@ main_end:
 	}
 }
 
-FARPROC __stdcall MyGetProcAddress(WCHAR *pszModuleProcStr)
+DWORD_PTR __stdcall GetFunctionPtr(WCHAR ***pp_argv)
+{
+	DWORD_PTR dwRet;
+	WCHAR *argv = **pp_argv;
+
+	dwRet = (DWORD_PTR)MyGetProcAddress(argv);
+	(*pp_argv)++;
+
+	return dwRet;
+}
+
+DWORD_PTR __stdcall GetNextArg(WCHAR ***pp_argv, BOOL *pbNoMoreArgs)
+{
+	DWORD_PTR dwRet;
+	WCHAR *argv = **pp_argv;
+	if(!argv)
+	{
+		*pbNoMoreArgs = TRUE;
+		return 0;
+	}
+
+	if(argv[0] != L'\0' && argv[1] == L'\0')
+	{
+		switch(argv[0])
+		{
+		case L',':
+		case L')':
+			*pbNoMoreArgs = TRUE;
+			return 0;
+
+		case L'(':
+			(*pp_argv)++;
+			argv = **pp_argv;
+			if(!argv)
+			{
+				*pbNoMoreArgs = TRUE;
+				return 0;
+			}
+
+			dwRet = ParseExecArgs(pp_argv);
+			argv = **pp_argv;
+
+			// After calling ParseExecArgs, argv is supposed
+			// to point at a NULL pointer, or ")"
+
+			if(argv && argv[0] == L')' && argv[1] == L'\0')
+				(*pp_argv)++;
+
+			*pbNoMoreArgs = FALSE;
+			return dwRet;
+		}
+	}
+
+	dwRet = ParseArg(argv);
+	*(DWORD_PTR *)*pp_argv = dwRet;
+	(*pp_argv)++;
+
+	*pbNoMoreArgs = FALSE;
+	return dwRet;
+}
+
+__declspec(noreturn) void __stdcall FatalStackError(WCHAR **p_argv)
+{
+	int nArgIndex = p_argv - argv;
+	FatalExitMsgBox(L"Stack error on argument number %d", nArgIndex);
+}
+
+FARPROC MyGetProcAddress(WCHAR *pszModuleProcStr)
 {
 	WCHAR *psz;
 	WCHAR *pszModule, *pszProc;
@@ -187,7 +226,7 @@ FARPROC __stdcall MyGetProcAddress(WCHAR *pszModuleProcStr)
 	else
 	{
 		*psz = L'\0';
-		pszProc = psz+1;
+		pszProc = psz + 1;
 
 		pszModule = pszModuleProcStr;
 
@@ -222,12 +261,12 @@ FARPROC __stdcall MyGetProcAddress(WCHAR *pszModuleProcStr)
 	return fpProc;
 }
 
-DWORD __stdcall ParseArg(WCHAR *pszArg)
+DWORD_PTR ParseArg(WCHAR *pszArg)
 {
 	BOOL bParsed;
 	WCHAR *pszStr;
 	char *pszAsciiStr;
-	DWORD dw, dw2;
+	DWORD_PTR dw, dw2;
 
 	bParsed = FALSE;
 
@@ -236,37 +275,37 @@ DWORD __stdcall ParseArg(WCHAR *pszArg)
 		switch(pszArg[1])
 		{
 		case L's': // ascii string
-			pszAsciiStr = UnicodeToAscii(pszArg+3);
+			pszAsciiStr = UnicodeToAscii(pszArg + 3);
 			lstrcpyA((char *)pszArg, pszAsciiStr);
 			HeapFree(GetProcessHeap(), 0, pszAsciiStr);
 
-			dw = (DWORD)pszArg;
+			dw = (DWORD_PTR)pszArg;
 			bParsed = TRUE;
 			break;
 
 		case L'u': // unicode string
-			dw = (DWORD)(pszArg + 3);
+			dw = (DWORD_PTR)(pszArg + 3);
 			bParsed = TRUE;
 			break;
 
 		case L'b': // buffer
-			StrToDword(pszArg+3, &dw);
+			StrToDwordPtr(pszArg + 3, &dw);
 			if(dw > 0)
-				dw = (DWORD)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS | HEAP_ZERO_MEMORY, dw);
+				dw = (DWORD_PTR)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS | HEAP_ZERO_MEMORY, dw);
 			else
-				dw = (DWORD)pszArg;
+				dw = (DWORD_PTR)pszArg;
 
 			bParsed = TRUE;
 			break;
 
 		case L'$': // another arg
-			pszStr = StrToDword(pszArg+3, &dw);
-			dw = (DWORD)argv[dw];
+			pszStr = StrToDwordPtr(pszArg + 3, &dw);
+			dw = (DWORD_PTR)argv[dw];
 
 			while(*pszStr == '@')
 			{
-				pszStr = StrToDword(pszStr+1, &dw2);
-				dw = ((DWORD *)dw)[dw2];
+				pszStr = StrToDwordPtr(pszStr + 1, &dw2);
+				dw = ((DWORD_PTR *)dw)[dw2];
 			}
 
 			bParsed = TRUE;
@@ -281,7 +320,7 @@ DWORD __stdcall ParseArg(WCHAR *pszArg)
 
 	if(!bParsed)
 	{
-		pszStr = StrToDword(pszArg, &dw);
+		pszStr = StrToDwordPtr(pszArg, &dw);
 		if(*pszStr == L'\0')
 			bParsed = TRUE;
 	}
@@ -289,19 +328,19 @@ DWORD __stdcall ParseArg(WCHAR *pszArg)
 	if(bParsed)
 		return dw;
 
-	return (DWORD)pszArg;
+	return (DWORD_PTR)pszArg;
 }
 
-DWORD ParseArrayArg(WCHAR *pszArrayArg)
+DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg)
 {
 	int array_count;
 	int i;
-	DWORD *pdw;
+	DWORD_PTR *pdw;
 	WCHAR *pszNext;
 
 	array_count = 1;
 
-	for(i=0; pszArrayArg[i] != L'\0'; i++)
+	for(i = 0; pszArrayArg[i] != L'\0'; i++)
 	{
 		if(pszArrayArg[i] == L',')
 		{
@@ -310,22 +349,22 @@ DWORD ParseArrayArg(WCHAR *pszArrayArg)
 		}
 	}
 
-	pdw = (DWORD *)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, array_count * sizeof(DWORD));
+	pdw = (DWORD_PTR *)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, array_count * sizeof(DWORD_PTR));
 
-	for(i=0; i<array_count; i++)
+	for(i = 0; i < array_count; i++)
 	{
 		pszNext = pszArrayArg + lstrlen(pszArrayArg) + 1;
 		pdw[i] = ParseArg(pszArrayArg);
 		pszArrayArg = pszNext;
 	}
 
-	return (DWORD)pdw;
+	return (DWORD_PTR)pdw;
 }
 
-WCHAR *StrToDword(WCHAR *pszStr, DWORD *pdw)
+WCHAR *StrToDwordPtr(WCHAR *pszStr, DWORD_PTR *pdw)
 {
 	BOOL bMinus;
-	DWORD dw, dw2;
+	DWORD_PTR dw, dw2;
 
 	if(*pszStr == L'-')
 	{
@@ -373,7 +412,7 @@ WCHAR *StrToDword(WCHAR *pszStr, DWORD *pdw)
 	}
 
 	if(bMinus)
-		*pdw = (DWORD)-(long)dw; // :)
+		*pdw = (DWORD_PTR)-(LONG_PTR)dw; // :)
 	else
 		*pdw = dw;
 
@@ -392,9 +431,9 @@ char *UnicodeToAscii(WCHAR *pszUnicode)
 	return pszAscii;
 }
 
-__declspec(noreturn) void __stdcall FatalExitMsgBox(WCHAR *format, ...)
+__declspec(noreturn) void FatalExitMsgBox(WCHAR *format, ...)
 {
-	WCHAR buffer[1024+1];
+	WCHAR buffer[1024 + 1];
 	va_list args;
 
 	va_start(args, format);
