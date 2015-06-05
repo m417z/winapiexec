@@ -265,7 +265,7 @@ DWORD_PTR ParseArg(WCHAR *pszArg)
 DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg)
 {
 	BOOL bBracketsSyntax;
-	int nBracketsCount;
+	int nNestingCount;
 	int nArrayCount;
 	int i;
 	DWORD_PTR *pdw;
@@ -273,34 +273,37 @@ DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg)
 
 	// bBracketsSyntax is TRUE for "$a[1,2,3]", FALSE for "$a:1,2,3"
 	bBracketsSyntax = (pszArrayArg[2] == L'[');
-	nBracketsCount = 0;
+	nNestingCount = 0;
 
-	nArrayCount = 1;
+	pszArrayArg[2] = ',';
+	nArrayCount = 0;
 
-	for(i = 3; pszArrayArg[i] != L'\0'; i++)
+	for(i = 2; pszArrayArg[i] != L'\0'; i++)
 	{
-		if(bBracketsSyntax)
+		if(bBracketsSyntax && pszArrayArg[i] == L']')
 		{
-			if(pszArrayArg[i] == L'[')
+			if(nNestingCount == 0)
 			{
-				nBracketsCount++;
+				pszArrayArg[i] = L'\0';
+				break;
 			}
-			else if(pszArrayArg[i] == L']')
-			{
-				if(nBracketsCount == 0)
-				{
-					pszArrayArg[i] = L'\0';
-					break;
-				}
 
-				nBracketsCount--;
-			}
+			nNestingCount--;
 		}
 
-		if(nBracketsCount == 0 && pszArrayArg[i] == L',')
+		if(nNestingCount == 0 && pszArrayArg[i] == L',')
 		{
 			pszArrayArg[i] = L'\0';
 			nArrayCount++;
+
+			if(bBracketsSyntax &&
+				pszArrayArg[i + 1] == L'$' &&
+				pszArrayArg[i + 2] == L'a' &&
+				pszArrayArg[i + 3] == L'[')
+			{
+				nNestingCount++;
+				i += 3;
+			}
 		}
 	}
 
