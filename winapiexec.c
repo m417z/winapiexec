@@ -3,8 +3,9 @@
 
 #define DEF_VERSION L"1.0"
 
+extern DWORD_PTR __stdcall ParseExecFunction(WCHAR ***pp_argv);
+
 DWORD_PTR ParseExecArgs(WCHAR ***pp_argv);
-DWORD_PTR __stdcall ParseExecFunction(WCHAR ***pp_argv);
 DWORD_PTR __stdcall GetFunctionPtr(WCHAR ***pp_argv);
 DWORD_PTR __stdcall GetNextArg(WCHAR ***pp_argv, BOOL *pbNoMoreArgs);
 __declspec(noreturn) void __stdcall FatalStackError(WCHAR **p_argv);
@@ -35,7 +36,7 @@ void main()
 	}
 
 	p_argv = &argv[1];
-	ExitProcess(ParseExecArgs(&p_argv));
+	ExitProcess((UINT)ParseExecArgs(&p_argv));
 }
 
 DWORD_PTR ParseExecArgs(WCHAR ***pp_argv)
@@ -61,82 +62,6 @@ DWORD_PTR ParseExecArgs(WCHAR ***pp_argv)
 	}
 
 	return dwRet;
-}
-
-__declspec(naked) DWORD_PTR __stdcall ParseExecFunction(WCHAR ***pp_argv)
-{
-	__asm
-	{
-
-	push ebp // Stack
-	mov ebp, esp
-	push ebx // Pointer to the function name argument
-	push ecx // Stack variable, used as bNoMoreArgs
-
-	// Save pointer to the function name argument
-	mov ecx, pp_argv
-	mov ebx, dword ptr [ecx]
-
-	// Push 16 zeros on the stack, for better safety
-	mov ecx, 0x10
-push_zeroes_loop:
-	push 0x00
-	loop push_zeroes_loop
-
-	// Push function pointer and arguments
-	push pp_argv
-	call GetFunctionPtr
-
-arguments_parse_loop:
-	push eax
-
-	lea ecx, dword ptr [ebp-0x08]
-	push ecx
-	push pp_argv
-	call GetNextArg
-
-	cmp dword ptr [ebp-0x08], 0
-	je arguments_parse_loop // jmp if !bNoMoreArgs
-
-	// Reverse arguments in stack
-	mov eax, esp
-	lea ecx, dword ptr [ebp-0x4C]
-
-arguments_reverse_loop:
-	mov edx, dword ptr [eax]
-	xchg dword ptr [ecx], edx
-	mov dword ptr [eax], edx
-	
-	add eax, 0x04
-	sub ecx, 0x04
-
-	cmp eax, ecx
-	jb arguments_reverse_loop
-	
-	// Call!
-	pop eax
-	call eax
-
-	mov dword ptr [ebx], eax
-
-	// Check and restore stack
-	lea ecx, dword ptr [ebp-0x48]
-	cmp esp, ecx
-	jbe stack_is_ok
-
-	push ebx
-	call FatalStackError
-
-stack_is_ok:
-	mov esp, ecx
-	add esp, 0x44
-
-	// Done
-	pop ebx
-	pop ebp
-	ret 0x04
-
-	}
 }
 
 DWORD_PTR __stdcall GetFunctionPtr(WCHAR ***pp_argv)
@@ -202,7 +127,7 @@ DWORD_PTR __stdcall GetNextArg(WCHAR ***pp_argv, BOOL *pbNoMoreArgs)
 
 __declspec(noreturn) void __stdcall FatalStackError(WCHAR **p_argv)
 {
-	int nArgIndex = p_argv - argv;
+	int nArgIndex = (int)(p_argv - argv);
 	FatalExitMsgBox(L"Stack error on argument number %d", nArgIndex);
 }
 

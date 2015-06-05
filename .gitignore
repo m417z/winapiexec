@@ -34,3 +34,6 @@ Ankh.NoLoad
 *.i
 *.i-*
 *.PVS-Studio.cfg
+
+#Preserve FASM *.obj files
+!asm/*.obj
