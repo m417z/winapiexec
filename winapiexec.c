@@ -1,7 +1,7 @@
 #include <windows.h>
 #include "buffer.h"
 
-#define DEF_VERSION L"1.1"
+#define DEF_VERSION L"1.2"
 
 extern DWORD_PTR __stdcall ParseExecFunction(WCHAR ***pp_argv);
 
