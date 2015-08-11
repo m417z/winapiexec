@@ -42,24 +42,30 @@ void main()
 DWORD_PTR ParseExecArgs(WCHAR ***pp_argv)
 {
 	DWORD_PTR dwRet;
-	WCHAR *argv;
+	WCHAR **p_argv;
+	WCHAR *arg;
 
-	dwRet = ParseExecFunction(pp_argv);
-	argv = **pp_argv;
+	p_argv = *pp_argv;
 
-	// After calling ParseExecFunction, argv is supposed
-	// to point at a NULL pointer, or ",", or ")"
+	dwRet = ParseExecFunction(&p_argv);
 
-	while(argv && argv[0] == L',' && argv[1] == L'\0')
+	// After calling ParseExecFunction, p_argv is supposed
+	// to point at the end of the array, or ",", or ")"
+
+	while(p_argv != &argv[argc])
 	{
-		(*pp_argv)++;
-		argv = **pp_argv;
-		if(!argv)
+		arg = *p_argv;
+		if(arg[0] != L',' || arg[1] != L'\0')
 			break;
 
-		dwRet = ParseExecFunction(pp_argv);
-		argv = **pp_argv;
+		p_argv++;
+		if(p_argv == &argv[argc])
+			break;
+
+		dwRet = ParseExecFunction(&p_argv);
 	}
+
+	*pp_argv = p_argv;
 
 	return dwRet;
 }
@@ -67,10 +73,16 @@ DWORD_PTR ParseExecArgs(WCHAR ***pp_argv)
 DWORD_PTR __stdcall GetFunctionPtr(WCHAR ***pp_argv)
 {
 	DWORD_PTR dwRet;
-	WCHAR *argv = **pp_argv;
+	WCHAR **p_argv;
+	WCHAR *arg;
 
-	dwRet = (DWORD_PTR)MyGetProcAddress(argv);
-	(*pp_argv)++;
+	p_argv = *pp_argv;
+
+	arg = *p_argv;
+	dwRet = (DWORD_PTR)MyGetProcAddress(arg);
+	p_argv++;
+
+	*pp_argv = p_argv;
 
 	return dwRet;
 }
@@ -78,50 +90,71 @@ DWORD_PTR __stdcall GetFunctionPtr(WCHAR ***pp_argv)
 DWORD_PTR __stdcall GetNextArg(WCHAR ***pp_argv, BOOL *pbNoMoreArgs)
 {
 	DWORD_PTR dwRet;
-	WCHAR *argv = **pp_argv;
-	if(!argv)
+	WCHAR **p_argv;
+	WCHAR *arg;
+	BOOL bSpecialArg;
+
+	p_argv = *pp_argv;
+	if(p_argv == &argv[argc])
 	{
 		*pbNoMoreArgs = TRUE;
 		return 0;
 	}
 
-	if(argv[0] != L'\0' && argv[1] == L'\0')
+	bSpecialArg = FALSE;
+
+	arg = *p_argv;
+	if(arg[0] != L'\0' && arg[1] == L'\0')
 	{
-		switch(argv[0])
+		switch(arg[0])
 		{
 		case L',':
 		case L')':
+			bSpecialArg = TRUE;
+
 			*pbNoMoreArgs = TRUE;
-			return 0;
+			dwRet = 0;
+			break;
 
 		case L'(':
-			(*pp_argv)++;
-			argv = **pp_argv;
-			if(!argv)
+			bSpecialArg = TRUE;
+
+			p_argv++;
+			if(p_argv == &argv[argc])
 			{
 				*pbNoMoreArgs = TRUE;
-				return 0;
+				dwRet = 0;
+				break;
 			}
 
-			dwRet = ParseExecArgs(pp_argv);
-			argv = **pp_argv;
+			dwRet = ParseExecArgs(&p_argv);
 
-			// After calling ParseExecArgs, argv is supposed
-			// to point at a NULL pointer, or ")"
+			// After calling ParseExecArgs, p_argv is supposed
+			// to point at the end of the array, or ")"
 
-			if(argv && argv[0] == L')' && argv[1] == L'\0')
-				(*pp_argv)++;
+			if(p_argv != &argv[argc])
+			{
+				arg = *p_argv;
+				if(arg[0] == L')' && arg[1] == L'\0')
+					p_argv++;
+			}
 
 			*pbNoMoreArgs = FALSE;
-			return dwRet;
+			break;
 		}
 	}
 
-	dwRet = ParseArg(argv);
-	*(DWORD_PTR *)*pp_argv = dwRet;
-	(*pp_argv)++;
+	if(!bSpecialArg)
+	{
+		dwRet = ParseArg(arg);
+		*(DWORD_PTR *)p_argv = dwRet;
+		p_argv++;
 
-	*pbNoMoreArgs = FALSE;
+		*pbNoMoreArgs = FALSE;
+	}
+
+	*pp_argv = p_argv;
+
 	return dwRet;
 }
 
