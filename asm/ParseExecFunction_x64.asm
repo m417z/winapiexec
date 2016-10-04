@@ -5,7 +5,7 @@ public ParseExecFunction as 'ParseExecFunction'
 extrn 'GetFunctionPtr' as GetFunctionPtr
 extrn 'GetNextArg' as GetNextArg
 ; Note: We don't need FatalStackError as we can't detect stack failures.
-;       In x64, caller cleans up the stack arguments.
+;	In x64, caller cleans up the stack arguments.
 ; extrn 'FatalStackError' as FatalStackError
 
 ParseExecFunction:
@@ -22,7 +22,7 @@ ParseExecFunction:
 	mov rbx, qword [rcx]
 
 	; Push 16 zeros on the stack, for better safety
-	mov rcx, 0x10
+	mov ecx, 0x10
 push_zeroes_loop:
 	push 0
 	loop push_zeroes_loop
