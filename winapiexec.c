@@ -302,7 +302,7 @@ DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg)
 	int nArrayCount;
 	int i;
 	DWORD_PTR *pdw;
-	WCHAR *pszArrayItem, *pszNextItem;
+	WCHAR *pszArrayItem;
 
 	// bBracketsSyntax is TRUE for "$a[1,2,3]", FALSE for "$a:1,2,3"
 	bBracketsSyntax = (pszArrayArg[2] == L'[');
@@ -345,9 +345,8 @@ DWORD_PTR ParseArrayArg(WCHAR *pszArrayArg)
 	pszArrayItem = pszArrayArg + 3;
 	for(i = 0; i < nArrayCount - 1; i++)
 	{
-		pszNextItem = pszArrayItem + lstrlen(pszArrayItem) + 1;
 		pdw[i] = ParseArg(pszArrayItem);
-		pszArrayItem = pszNextItem;
+		pszArrayItem += lstrlen(pszArrayItem) + 1;
 	}
 	pdw[i] = ParseArg(pszArrayItem);
 
